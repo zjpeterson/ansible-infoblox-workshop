@@ -1,0 +1,53 @@
+---
+- name: Make NIOS instance
+  vars:
+    aws_ec2_region: "{{ aws_region }}"
+    aws_ec2_name: "{{ infoblox_instance_name | default('infoblox') }}"
+    aws_ec2_dns_zone: "{{ dns_zone }}"
+    aws_ec2_type: m6i.2xlarge
+    aws_ec2_ami: "{{ aws_ami_nios }}"
+    aws_ec2_disk: 500
+    aws_ec2_net_advanced: true
+    aws_ec2_net_interfaces:
+      - device_index: 0
+        description: MGMT
+        subnet_id: "{{ aws_ec2_subnet }}"
+      - device_index: 1
+        description: LAN1
+        subnet_id: "{{ aws_ec2_subnet }}"
+    aws_ec2_user_data: |
+      #infoblox-config
+      remote_console_enabled: y
+      default_admin_password: '{{ admin_password }}'
+  ansible.builtin.include_role:
+    name: zjpeterson.labcommon.aws_ec2
+
+- name: Get instance info and wait until instance initializes
+  amazon.aws.ec2_instance_info:
+    region: "{{ aws_region }}"
+    filters:
+      "tag:Name": "{{ infoblox_instance_name | default('infoblox') }}"
+      instance-state-name: ["running"]
+  register: _info
+  until: _info.instances.0 is defined
+  retries: 30
+  delay: 10
+
+- name: Make elastic IP for LAN1 interface
+  vars:
+    _interface: "{{ _info.instances.0.network_interfaces | selectattr('description', 'equalto', 'LAN1') }}"
+  amazon.aws.ec2_eip:
+    region: "{{ aws_region }}"
+    device_id: "{{ _interface.0.network_interface_id }}"
+    in_vpc: true
+  register: _eip
+
+- name: Create instance DNS
+  amazon.aws.route53:
+    state: present
+    record: "{{ infoblox_instance_name | default('infoblox') }}.{{ dns_zone }}"
+    zone: "{{ dns_zone }}"
+    type: A
+    value: "{{ _eip.public_ip }}"
+    overwrite: true
+    wait: false
