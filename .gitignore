@@ -1,0 +1,6 @@
+provisioner/collections
+provisioner/ansible.pem
+provisioner/admin-password
+provisioner/extra_vars.yml
+provisioner/manifest.zip
+*.log

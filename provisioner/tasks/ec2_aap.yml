@@ -1,0 +1,31 @@
+---
+- name: Make AAP instance
+  vars:
+    aws_ec2_region: "{{ aws_region }}"
+    aws_ec2_name: "student{{ _student }}.{{ aap_instance_name | default('aap') }}"
+    aws_ec2_dns_zone: "{{ dns_zone }}"
+    aws_ec2_type: m5.large
+    aws_ec2_ami: "{{ aws_ami_rhel }}"
+    aws_ec2_disk: 50
+    aws_ec2_net_advanced: false
+  ansible.builtin.include_role:
+    name: zjpeterson.labcommon.aws_ec2
+
+- name: Get instance info
+  amazon.aws.ec2_instance_info:
+    region: "{{ aws_region }}"
+    filters:
+      "tag:Name": "student{{ _student }}.{{ aap_instance_name | default('aap') }}"
+      instance-state-name: ["running"]
+  register: _info
+  until: _info.instances.0.public_ip_address is defined
+
+- name: Add AAP to temp inventory
+  ansible.builtin.add_host:
+    name: "student{{ _student }}.{{ aap_instance_name | default('aap') }}.{{ dns_zone }}"
+    groups: aap
+    ansible_host: "{{ _info.instances.0.public_ip_address }}"
+    ansible_user: ec2-user
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/ansible.pem"
+    aap_install_aio_host: "{{ _info.instances.0.private_dns_name }}"
+    student: "{{ _student }}"

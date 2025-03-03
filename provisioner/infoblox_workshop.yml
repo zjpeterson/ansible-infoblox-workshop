@@ -1,0 +1,104 @@
+---
+- name: Deploy EC2 instances
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    admin_password: "{{ lookup('password', playbook_dir + '/admin-password') }}"
+    # override in extra vars if another region is needed:
+    aws_region: us-east-2
+    aws_ami_nios: ami-0f45acaccd3755abc # NIOS 9 PAYGO us-east-2
+    aws_ami_rhel: ami-002acc74c401fa86b # RHEL 9.5 us-east-2
+    aws_ami_gitea: ami-0ee96277c906c06bb # Bitnami Gitea us-east-2
+
+  tasks:
+    - name: Make VPC
+      vars:
+        aws_vpc_region: "{{ aws_region }}"
+      ansible.builtin.include_role:
+        name: zjpeterson.labcommon.aws_vpc
+
+    # this will fail the first time you run it!
+    # follow the AMI subscription link given in the error
+    # or in advance: https://aws.amazon.com/marketplace/server/procurement?productId=prod-3c6jb6d3xmhge
+    - name: Make NIOS instance
+      ansible.builtin.include_tasks: tasks/ec2_nios.yml
+
+    # again like above
+    # https://aws.amazon.com/marketplace/server/procurement?productId=4f6ddc85-837d-4c6a-9367-4e9a206597c9
+    - name: Make Gitea instance
+      ansible.builtin.include_tasks: tasks/ec2_gitea.yml
+
+    - name: Make AAP instances
+      ansible.builtin.include_tasks: tasks/ec2_aap.yml
+      loop: "{{ range(1, students | int + 1) }}"
+      loop_control:
+        loop_var: _student
+
+- name: Configure Gitea
+  hosts: gitea
+  gather_facts: false
+
+  vars:
+    admin_password: "{{ lookup('password', playbook_dir + '/admin-password') }}"
+
+  tasks:
+    - name: Gitea config tasks
+      ansible.builtin.include_tasks: tasks/config_gitea.yml
+
+- name: Install AAP AIO
+  hosts: aap
+  gather_facts: false
+
+  vars:
+    aap_install_admin_password: "{{ lookup('password', playbook_dir + '/admin-password') }}"
+    aap_install_mode: containerized
+    aap_install_topology: aio
+    aap_install_omit_components:
+      - hub
+      - eda
+    aap_username: admin
+    aap_password: "{{ aap_install_admin_password }}"
+    aap_hostname: "{{ ansible_host }}"
+    aap_validate_certs: false
+    controller_license:
+      manifest_file: manifest.zip
+    controller_settings:
+      settings:
+        AWX_TASK_ENV:
+          GIT_SSL_NO_VERIFY: "True"
+    controller_credentials:
+      - name: AWS API
+        credential_type: Amazon Web Services
+        organization: Default
+        inputs:
+          username: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+          password: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+      - name: AWS SSH
+        credential_type: Machine
+        organization: Default
+        inputs:
+          username: ec2-user
+          ssh_key_data: "{{ lookup('file', 'ansible.pem') }}"
+      - name: Gitea
+        credential_type: Source Control
+        organization: Default
+        inputs:
+          username: student{{ student }}
+          password: "{{ aap_install_admin_password }}"
+    controller_projects:
+      - name: student{{ student }}-code
+        organization: Default
+        scm_type: git
+        scm_url: https://gitea.{{ dns_zone }}/student{{ student }}/student{{ student }}-code.git
+        scm_update_on_launch: true
+        credential: Gitea
+
+  roles:
+    - zjpeterson.labcommon.aap_download
+    - zjpeterson.labcommon.aap_install
+    - infra.aap_configuration.controller_license
+    - infra.aap_configuration.controller_settings
+    - infra.aap_configuration.controller_credentials
+    - infra.aap_configuration.controller_projects

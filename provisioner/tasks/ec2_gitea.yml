@@ -1,0 +1,28 @@
+---
+- name: Make Gitea instance
+  vars:
+    aws_ec2_region: "{{ aws_region }}"
+    aws_ec2_name: gitea
+    aws_ec2_dns_zone: "{{ dns_zone }}"
+    aws_ec2_type: t3a.small
+    aws_ec2_ami: "{{ aws_ami_gitea }}"
+    aws_ec2_disk: 20
+    aws_ec2_net_advanced: false
+  ansible.builtin.include_role:
+    name: zjpeterson.labcommon.aws_ec2
+
+- name: Get instance info
+  amazon.aws.ec2_instance_info:
+    region: "{{ aws_region }}"
+    filters:
+      "tag:Name": gitea
+      instance-state-name: ["running"]
+  register: _info
+  until: _info.instances.0.public_ip_address is defined
+
+- name: Add AAP to temp inventory
+  ansible.builtin.add_host:
+    name: gitea
+    ansible_host: "{{ _info.instances.0.public_ip_address }}"
+    ansible_user: bitnami
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/ansible.pem"

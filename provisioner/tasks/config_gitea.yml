@@ -1,0 +1,57 @@
+---
+- name: Wait for instance to come up
+  ansible.builtin.wait_for_connection:
+
+- name: Read in credential file once app is up
+  ansible.builtin.slurp:
+    src: /home/bitnami/bitnami_credentials
+  register: _cred
+  until: "'The machine is being initialized' not in _cred.content | b64decode"
+  retries: 20
+  delay: 5
+
+- name: Extract password
+  ansible.builtin.set_fact:
+    _builtin_admin_password: "{{ _cred.content | b64decode | regex_search(\"username and password is 'bn_user' and '(.+?)'\", '\\1') | first }}"
+
+- name: Make student users
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/api/v1/admin/users"
+    validate_certs: false
+    user: bn_user
+    password: "{{ _builtin_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    method: POST
+    body:
+      username: "student{{ item }}"
+      password: "{{ admin_password }}"
+      email: "student{{ item }}@workshop.lab"
+      must_change_password: false
+    status_code:
+      - 201
+      - 422
+  register: _user
+  changed_when: _user.status == 201
+  loop: "{{ range(1, students | int + 1) }}"
+
+- name: Make student repos
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/api/v1/admin/users/student{{ item }}/repos"
+    validate_certs: false
+    user: bn_user
+    password: "{{ _builtin_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    method: POST
+    body:
+      name: student{{ item }}-code
+      private: true
+      auto_init: true
+      default_branch: main
+    status_code:
+      - 201
+      - 409
+  register: _repo
+  changed_when: _repo.status == 201
+  loop: "{{ range(1, students | int + 1) }}"

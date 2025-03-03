@@ -1,0 +1,13 @@
+---
+ansible-navigator:
+  mode: stdout
+  playbook-artifact:
+    enable: False
+  execution-environment:
+    container-engine: docker
+    image: registry.redhat.io/ansible-automation-platform-25/ee-supported-rhel8
+    environment-variables:
+      pass:
+        - AWS_ACCESS_KEY_ID
+        - AWS_SECRET_ACCESS_KEY
+        - AWS_SESSION_TOKEN
